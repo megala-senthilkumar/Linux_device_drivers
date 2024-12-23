@@ -7,6 +7,7 @@
 #include<linux/platform_device.h>
 #include<linux/slab.h>
 #include<linux/mod_devicetable.h>
+#include<linux/of.h>
 
 #include"platform.h"
 
@@ -37,11 +38,23 @@ struct device_config pcdev_config[] =
 
 struct platform_device_id pcdevs_ids[] = 
 {
-[0]={.name = "pcdev-A1x", .driver_data = PCDEVA1X},
-[1]={.name = "pcdev-B1x", .driver_data = PCDEVB1X},
-[2]={.name = "pcdev-C1x", .driver_data = PCDEVC1X},
-[3]={.name = "pcdev-D1x", .driver_data = PCDEVD1X}      //this driver doesn't support d1x
+	{.name = "pcdev-A1x", .driver_data = PCDEVA1X},
+	{.name = "pcdev-B1x", .driver_data = PCDEVB1X},
+	{.name = "pcdev-C1x", .driver_data = PCDEVC1X},
+	{.name = "pcdev-D1x", .driver_data = PCDEVD1X},      //this driver doesn't support d1x
+	{}
 };
+
+struct of_device_id org_pcdev_dt_match[]=
+{
+	{.compatible = "pcdev-A1x",.data = (void*)PCDEVA1X},
+	{.compatible = "pcdev-B1x",.data = (void*)PCDEVB1X},
+	{.compatible = "pcdev-C1x",.data = (void*)PCDEVC1X},
+	{.compatible = "pcdev-D1x",.data = (void*)PCDEVD1X},
+	{}
+};
+
+
 /* device private data structure */
 struct pcdev_private_data
 {
@@ -206,7 +219,8 @@ struct platform_driver pcd_platform_driver =
     .remove = pcd_platform_driver_remove,
     .id_table = pcdevs_ids,
     .driver = {
-                .name = "pseudo-char-device"
+                .name = "pseudo-char-device",
+		.of_match_table = org_pcdev_dt_match
       }
 };
 
