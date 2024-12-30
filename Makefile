@@ -1,4 +1,4 @@
-obj-m := pcd_platform_driver_dt.o
+obj-m := pcd_platform_driver.o
 ARCH=arm
 CROSS_COMPILE=arm-linux-gnueabihf-
 #set KERN_DIR to linux source location 

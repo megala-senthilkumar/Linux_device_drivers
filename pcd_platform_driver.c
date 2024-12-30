@@ -8,6 +8,7 @@
 #include<linux/slab.h>
 #include<linux/mod_devicetable.h>
 #include<linux/of.h>
+#include<linux/of_device.h>
 
 #include"platform.h"
 
@@ -127,7 +128,7 @@ struct file_operations my_fops =
 /*gets called when the device is removed from the system*/
 int pcd_platform_driver_remove(struct platform_device *pdev)
 {
-#if 0
+#if 1
 struct pcdev_private_data *dev_data = dev_get_drvdata(&pdev->dev);
 /*1. Remove a device that was created with device_create() */
 device_destroy(pcdrv_data.class_my, dev_data->dev_num);
@@ -140,33 +141,78 @@ cdev_del(&dev_data->my_cdev);
 
 pcdrv_data.total_devices--;
 #endif
-pr_info("A device is removed\n");
+dev_info(&pdev->dev,"A device is removed\n");
 return 0;
 }
 
+struct pcdev_platform_data* pcdev_get_platform(struct device* dev)
+{
+	struct device_node *dev_node = dev->of_node;
+	struct pcdev_platform_data *pdata;
+	if(!dev_node)	
+	{
+		/*this probe didn't happen because of device tree node*/
+		return NULL;
+	}
+	pdata = devm_kzalloc(dev,sizeof(*pdata),GFP_KERNEL);
 
+	if(!pdata){
+		dev_info(dev,"Cannot allocate memory \n");
+		return ERR_PTR(-ENOMEM);
+	}
+	if(of_property_read_string(dev_node,"org,device-serial-num",&pdata->serial_number) ){
+		dev_info(dev,"Missing serial number property \n");
+		return ERR_PTR(-EINVAL);
+	}
+	if(of_property_read_u32(dev_node,"org,size",&pdata->size) ){
+		dev_info(dev,"Missing Size property \n");
+		return ERR_PTR(-EINVAL);
+	}
+	if(of_property_read_u32(dev_node,"org,perm",&pdata->perm) ){
+               dev_info(dev,"Missing permission property \n");
+                return ERR_PTR(-EINVAL);
+        }
+	return pdata;
+}
 /*gets called when matched platform device is found*/
 int pcd_platform_driver_probe(struct platform_device *pdev)
 {
 int ret;
-#if 0
+
 struct pcdev_private_data *dev_data;
 struct pcdev_platform_data *pdata;
+struct device *dev = &pdev->dev;
+int driver_data;
+dev_info(dev,"A device is detected \n");
 
-pr_info("A device is detected \n");
+pdata = pcdev_get_platform(dev);
 
-/*1. Get the platform data*/
-pdata = (struct pcdev_platform_data*)dev_get_platdata(&pdev->dev);
-if(!pdata){
-    pr_info("No platform data available\n");
-    return -EINVAL;
-    
-    }
+if(IS_ERR(pdata))
+	return PTR_ERR(pdata);
+if(!pdata)
+{
+	/*1. Get the platform data*/
+	pdata = (struct pcdev_platform_data*)dev_get_platdata(dev);
+	if(!pdata){
+    		dev_info(dev,"No platform data available\n");
+    		return -EINVAL;
+	}
+
+	driver_data = pdev->id_entry->driver_data;
+}
+else
+{
+	driver_data = (int)of_device_get_match_data(dev);
+	// below 2 lines are substitute to the above oneline , it is kernel's  helper or wrapper fun present in of_device.h 
+	//match = of_match_device(pdev->dev.driver->of_match_table, &pdev->dev);
+	//driver_data = (int)match->data;
+}
+
 /*2. Dynamically allocate memory for the device private data*/
 //dev_data = kzalloc(sizeof(*dev_data), GFP_KERNEL);
 dev_data = devm_kzalloc(&pdev->dev,sizeof(*dev_data), GFP_KERNEL);
 if(!dev_data){
-    pr_info("Cannot allocate memory \n");
+    dev_info(dev,"Cannot allocate memory \n");
     return -ENOMEM;
 }
 
@@ -180,8 +226,8 @@ pr_info("Device serial number = %s\n",dev_data->pdata.serial_number );
 pr_info("Device size = %d\n", dev_data->pdata.size);
 pr_info("Device permission = %d\n", dev_data->pdata.perm);
 
-pr_info("Config item 1 =%d\n",pcdev_config[pdev->id_entry->driver_data].config_item1);
-pr_info("Config item 2 =%d\n",pcdev_config[pdev->id_entry->driver_data].config_item2);
+pr_info("Config item 1 =%d\n",pcdev_config[driver_data].config_item1);
+pr_info("Config item 2 =%d\n",pcdev_config[driver_data].config_item2);
 /*3. Dynamically allocate memory for the device buffer using size information from the platform data*/
 //dev_data->buffer = kzalloc(dev_data->pdata.size, GFP_KERNEL);
 dev_data->buffer = devm_kzalloc(&pdev->dev,dev_data->pdata.size, GFP_KERNEL);
@@ -191,7 +237,7 @@ if(!dev_data->buffer){
 }
 
 /*4. Get the device number*/
-dev_data->dev_num = pcdrv_data.device_num_base + pdev->id;
+dev_data->dev_num = pcdrv_data.device_num_base + pcdrv_data.total_devices;
 
 /*5. Do cdev init and cdev add*/
 cdev_init(&dev_data->my_cdev, &my_fops);
@@ -199,21 +245,21 @@ cdev_init(&dev_data->my_cdev, &my_fops);
 dev_data->my_cdev.owner = THIS_MODULE;
 ret = cdev_add(&dev_data->my_cdev,dev_data->dev_num, 1);
 if(ret < 0){
-	pr_err("cdev add failed\n");
+	dev_err(dev,"cdev add failed\n");
 	return ret;
 }
 /*6. Create device file for the detected platform device */
-pcdrv_data.device_my = device_create(pcdrv_data.class_my,NULL,dev_data->dev_num,NULL,"mypcdev-%d",pdev->id);
+pcdrv_data.device_my = device_create(pcdrv_data.class_my,dev,dev_data->dev_num,NULL,"mypcdev-%d",pcdrv_data.total_devices);
 if(IS_ERR(pcdrv_data.device_my))
 {
-	pr_err("edvice create failued\n");
+	dev_err(dev,"device create failued\n");
 	ret = PTR_ERR(pcdrv_data.device_my);
 	cdev_del(&dev_data->my_cdev); 
 	return ret;
 }
 pcdrv_data.total_devices++;
-#endif
-pr_info("Probe was successfull\n");
+
+dev_info(dev,"Probe was successfull\n");
 return 0;
 }
 
