@@ -183,29 +183,32 @@ struct pcdev_private_data *dev_data;
 struct pcdev_platform_data *pdata;
 struct device *dev = &pdev->dev;
 int driver_data;
-dev_info(dev,"A device is detected \n");
+/* used to store matched entry of of_device_id list ofthis driver */
+const struct of_device_id *match;
 
+dev_info(dev,"A device is detected \n");
+/* match will always be NULL if linux does support device tree i.e CONFIG_OF is off  */
+match = of_match_device(of_match_ptr(org_pcdev_dt_match),dev);
+
+if(match)
+{
 pdata = pcdev_get_platform(dev);
 
 if(IS_ERR(pdata))
 	return PTR_ERR(pdata);
-if(!pdata)
-{
-	/*1. Get the platform data*/
-	pdata = (struct pcdev_platform_data*)dev_get_platdata(dev);
-	if(!pdata){
-    		dev_info(dev,"No platform data available\n");
-    		return -EINVAL;
-	}
-
-	driver_data = pdev->id_entry->driver_data;
+driver_data = (int)match->data;
 }
 else
 {
-	driver_data = (int)of_device_get_match_data(dev);
-	// below 2 lines are substitute to the above oneline , it is kernel's  helper or wrapper fun present in of_device.h 
-	//match = of_match_device(pdev->dev.driver->of_match_table, &pdev->dev);
-	//driver_data = (int)match->data;
+
+	/* Get the platform data*/
+	pdata = (struct pcdev_platform_data*)dev_get_platdata(dev);
+	driver_data = pdev->id_entry->driver_data;
+}
+if(!pdata)
+{
+    	dev_info(dev,"No platform data available\n");
+    	return -EINVAL;
 }
 
 /*2. Dynamically allocate memory for the device private data*/
@@ -270,7 +273,7 @@ struct platform_driver pcd_platform_driver =
     .id_table = pcdevs_ids,
     .driver = {
                 .name = "pseudo-char-device",
-		.of_match_table = org_pcdev_dt_match
+		.of_match_table = of_match_ptr(org_pcdev_dt_match)
       }
 };
 
