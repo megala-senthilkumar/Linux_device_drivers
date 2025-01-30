@@ -1,33 +1,4 @@
-#include<linux/module.h>
-#include<linux/fs.h>
-#include<linux/cdev.h>
-#include<linux/device.h>
-#include<linux/kdev_t.h>	//MAJOR & MINOR Macro device id
-#include<linux/uaccess.h>	//
-#include<linux/platform_device.h>
-#include<linux/slab.h>
-#include<linux/mod_devicetable.h>
-#include<linux/of.h>
-#include<linux/of_device.h>
-
-#include"platform.h"
-
-#undef pr_fmt
-#define pr_fmt(fmt) "%s :" fmt,__func__
-
-struct device_config
-{
-int config_item1;
-int config_item2;
-};
-
-enum pcev_names
-{
-PCDEVA1X,
-PCDEVB1X,
-PCDEVC1X,
-PCDEVD1X
-};
+#include "pcd_platform_driver_dt_sysfs.h"
 
 struct device_config pcdev_config[] = 
 {
@@ -57,63 +28,7 @@ struct of_device_id org_pcdev_dt_match[]=
 
 
 /* device private data structure */
-struct pcdev_private_data
-{
-        struct pcdev_platform_data pdata;
-        char *buffer;
-        dev_t dev_num;
-        struct cdev my_cdev;
-};
-
-/* driver private data structure  */
-struct pcdrv_private_data
-{
-        int total_devices;
-	    dev_t device_num_base;
-	    struct class *class_my;
-        struct device *device_my;
-};
 struct pcdrv_private_data pcdrv_data;   //global var for driver
-int check_permission(int dev_perm, int acc_mode)
-{
-
-	if(dev_perm == RDWR)
-		return 0;
-	//ensures readonly access
-	if( (dev_perm == RDONLY) && ( (acc_mode & FMODE_READ) && !(acc_mode & FMODE_WRITE) ) )
-		return 0;
-	//ensures writeonly access
-	if( (dev_perm == WRONLY) && ( (acc_mode & FMODE_WRITE) && !(acc_mode & FMODE_READ) ) )
-		return 0;
-	return -EPERM;
-
-}
-
-loff_t my_llseek (struct file *filp, loff_t offset, int whence)
-{
-return 0;
-}
-
-ssize_t my_read (struct file *filp, char __user *buff, size_t count, loff_t *f_pos)
-{
-return 0;
-}
-
-ssize_t my_write (struct file *filp, const char __user *buff, size_t count, loff_t *f_pos)
-{
-return -ENOMEM;
-}
-int my_open (struct inode *inode, struct file *filp)
-{
-return 0;
-}
-
-int my_release (struct inode *inode, struct file *filp)
-{
-pr_info("close was successful\n");
-return 0;
-}
-
 
 struct file_operations my_fops = 
 {
@@ -124,6 +39,47 @@ struct file_operations my_fops =
 	.release = my_release,
 	.owner = THIS_MODULE
 };
+ssize_t show_serial_num(struct device *dev, struct device_attribute *attr,char *buf)
+{
+	/*get access to the device rivate data*/
+	struct pcdev_private_data *dev_data = dev_get_drvdata(dev->parent);
+	return sprintf(buf,"%s\n",dev_data->pdata.serial_number);
+        
+}
+ssize_t show_max_size(struct device *dev, struct device_attribute *attr,char *buf)
+{
+	 /*get access to the device rivate data*/
+        struct pcdev_private_data *dev_data = dev_get_drvdata(dev->parent);
+        return sprintf(buf,"%d\n",dev_data->pdata.size);
+}
+ssize_t store_max_size(struct device *dev, struct device_attribute *attr,const char *buf, size_t count)
+{
+	long result;
+	int ret;
+	struct pcdev_private_data *dev_data = dev_get_drvdata(dev->parent);
+
+	ret = kstrtol(buf,10,&result);
+	if(ret)
+        	return ret;
+	dev_data->pdata.size = result;
+	// as here we're changing the size we need to use realloc
+	dev_data->buffer = krealloc(dev_data->buffer,dev_data->pdata.size,GFP_KERNEL);
+	return count;
+}
+
+/* create 2 variables of struct device_attribite */
+static DEVICE_ATTR(max_size,S_IRUGO|S_IWUSR,show_max_size, store_max_size);
+static DEVICE_ATTR(serial_num,S_IRUGO,show_serial_num,NULL);
+
+int pcd_sysfs_create_files(struct device *pcd_dev)
+{
+	int ret;
+	ret = sysfs_create_file(&pcd_dev->kobj, &dev_attr_max_size.attr);
+	if(ret)
+		return ret;
+	return sysfs_create_file(&pcd_dev->kobj, &dev_attr_serial_num.attr);
+}
+
 
 /*gets called when the device is removed from the system*/
 int pcd_platform_driver_remove(struct platform_device *pdev)
@@ -261,6 +217,12 @@ if(IS_ERR(pcdrv_data.device_my))
 	return ret;
 }
 pcdrv_data.total_devices++;
+
+ret = pcd_sysfs_create_files(pcdrv_data.device_my);
+if(ret){
+	device_destroy(pcdrv_data.class_my, dev_data->dev_num);
+	return ret;
+}
 
 dev_info(dev,"Probe was successfull\n");
 return 0;
